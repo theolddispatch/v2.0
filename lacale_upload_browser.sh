@@ -25,7 +25,7 @@
 # =============================================================================
 # lacale_upload_browser.sh — Upload automatique depuis Radarr vers La Cale
 #                            via simulation navigateur (https://la-cale.space/upload)
-# Version : 2.0
+# Version : 2.1 — mise à jour des tags du formulaire
 # Emplacement : [chemin-vers-votre-dossier-scripts]
 # Dépendances : curl, jq (NAS), docker (pour création torrent via Alpine)
 # =============================================================================
@@ -45,6 +45,10 @@ MEDIAINFO_URL="${MEDIAINFO_URL:-http://[adresse-ip-nas]:[port-mediainfo]}"
 LACALE_URL="${LACALE_URL:-https://la-cale.space}"
 LACALE_USER="${LACALE_USER:-[email-compte-lacale]}"                     # email du compte La Cale
 LACALE_PASS="${LACALE_PASS:-[mot-de-passe-lacale]}"                     # mot de passe du compte La Cale
+# Cookies exportés depuis Chrome/Firefox (DevTools → Application → Cookies)
+# Quand définis, le login automatique est bypassed — ces cookies sont prioritaires
+# Cookies de session plus nécessaires — le login altcha fonctionne directement depuis le NAS
+# LACALE_COOKIE_SESSION et LACALE_COOKIE_CF ne sont plus utilisés
 TRACKER_URL="${TRACKER_URL:-https://tracker.la-cale.space/announce?passkey=[passkey-lacale]}"  # passkey visible dans votre profil La Cale
 
 # -- qBittorrent --
@@ -442,7 +446,7 @@ echo '      \/__/     \:\  \       /:/  /     \:\/:/  /  '
 echo '                 \:\__\     /:/  /       \::/  /   '
 echo '                  \/__/     \/__/         \/__/     — version formulaire web'
 printf '\n'
-log_section "Démarrage La Cale Upload Script v2.0 (Browser Mode — version formulaire web)"
+log_section "Démarrage La Cale Upload Script v2.1 (Browser Mode — termIds auto)"
 log "MAX_MOVIES : $MAX_MOVIES"
 log "NFO dir    : $NFO_DIR"
 log "Torrents   : $TORRENTS_DIR"
@@ -821,6 +825,153 @@ while IFS= read -r MOVIE_JSON; do
         continue
     fi
 
+
+    # ── Mapping des termIds (Caractéristiques de la release) ─────────────────
+    TERM_IDS=""
+
+    # Helper: ajouter un term
+    add_term() { TERM_IDS="${TERM_IDS:+${TERM_IDS},}$1"; }
+
+    # --- Genres (depuis Radarr/TMDB) ---
+    echo "$GENRES" | tr ',/' '\n' | while read -r G; do
+        G=$(echo "$G" | sed 's/^ *//;s/ *$//')
+        case "$G" in
+            Action)           echo "term_561bfb1bc6aa4eb236a0096055df56d3" ;;
+            Animation)        echo "term_104b4c4889059907b69469199e91e650" ;;
+            Adventure|Aventure) echo "term_53318115f9881cba4ea3c5d5fbcbdd7a" ;;
+            Biography|Biopic) echo "term_fc1f45b5830a6c43ac1e04c15de20fd6" ;;
+            Comedy|Comédie)   echo "term_2565c6c823f8770fd7bcaaf8825676e1" ;;
+            Documentary|Documentaire) echo "term_5c93004f538b8ff2d0384371e52f6926" ;;
+            Drama|Drame)      echo "term_86aac9f2daee035fd7fdbec3c01ec49c" ;;
+            Family|Familial)  echo "term_15736578e8038ed0adb120204921a6e3" ;;
+            Fantasy|Fantastique) echo "term_2c74d8bf4a34c8b3f1f41e66aebd5ec9" ;;
+            History|Historique) echo "term_6b60cdc761f4ea38e98a035868a73692" ;;
+            Horror|Horreur)   echo "term_6ec3481f6e45a178a3246e09a3be844b" ;;
+            Music|Musical)    echo "term_983454715ab3dbc095012bf20dc27ba7" ;;
+            "Crime"|"Policier / Thriller"|Thriller|Crime) echo "term_6dbb7e22f0aae37746d710ea3e23ce03" ;;
+            Romance)          echo "term_fb1342ef0b14b7384a3e450335e3fdc2" ;;
+            "Science Fiction"|"Science-fiction"|Sci-Fi) echo "term_845f0e31f46f4cfdf305681732759559" ;;
+            Sport|Sports)     echo "term_c6d861d65b8d6191e24d48fd18347581" ;;
+            War|Guerre)       echo "term_ffcb1f78a535d21a627116bb84b9fdb3" ;;
+            Western)          echo "term_6ba0e4717a668f400cd2526debb7d0fc" ;;
+            Suspense)         echo "term_788f7971971cfa7d4f7ff3028b17dcda" ;;
+            "TV Movie"|Téléfilm) echo "term_30d959f14ad88fc00700173a23c386d8" ;;
+        esac
+    done > "${WORK_DIR}/genre_terms.txt"
+    while IFS= read -r T; do [ -n "$T" ] && add_term "$T"; done < "${WORK_DIR}/genre_terms.txt"
+
+    # --- Qualité / Résolution ---
+    case "$RESOLUTION" in
+        2160p) add_term "term_947df6343911cdf2c9e477cf4bddfc56" ;;
+        1080p) add_term "term_e7dd3707cd20c0cfccd272334eba5bbf" ;;
+        720p)  add_term "term_4437c0c05981fa692427eb0d92a25a34" ;;
+        *)     add_term "term_6ade2712b8348f39b892c00119915454" ;;  # SD
+    esac
+
+    # --- Codec vidéo ---
+    case "$CODEC" in
+        x265) add_term "term_27dc36ee2c6fad6b87d71ed27e4b8266" ;;
+        x264) add_term "term_9289368e710fa0c350a4c64f36fb03b5" ;;
+        AV1)  add_term "term_e2806600360399f7597c9d582325d1ea" ;;
+    esac
+
+    # --- Caractéristiques vidéo ---
+    if [ -n "$HDR_TAG" ]; then
+        case "$HDR_TAG" in
+            *HDR10+*) add_term "term_3458ddfaf530675b6566cf48cda76001" ;;
+            *HDR*)    add_term "term_1e6061fe0dd0f6ce8027b1bce83b6b7d" ;;
+        esac
+        echo "$HDR_TAG" | grep -qi 'DV\|Dolby' && add_term "term_51d58202387e82525468fc738da02246"
+    fi
+    [ "$VIDEO_DEPTH" = "10" ] && add_term "term_ca34690b0fb2717154811a343bbfe05a"
+
+    # --- Source / Type ---
+    case "$SOURCE" in
+        "BluRay.REMUX") add_term "term_fdb58f8f752de86716d0312fcfecbc71" ; add_term "term_6251bf6918d6193d846e871b8b1c2f58" ;;
+        "BluRay")       add_term "term_6251bf6918d6193d846e871b8b1c2f58" ;;
+        "WEB-DL")       add_term "term_8d7cfc3d0e1178ae2925ef270235b8d3" ;;
+        "WEBRip")       add_term "term_2ad87475841ea5d8111d089e5f6f2108" ;;
+        "DVDRip")       add_term "term_7321eb03c51abdd81902fcff4cd26171" ;;
+        "HDTV")         add_term "term_b3cd9652a11c4bd9cdcbb7597ab8c39b" ;;
+        "WEB")          add_term "term_8d7cfc3d0e1178ae2925ef270235b8d3" ;;
+    esac
+
+    # --- Codec audio ---
+    AUDIO_UP=$(echo "$AUDIO_CODEC" | tr '[:lower:]' '[:upper:]')
+    case "$AUDIO_UP" in
+        *TRUEHD*ATMOS*|*ATMOS*TRUEHD*) add_term "term_a2cf45267addea22635047c4d69465a0" ;;
+        *TRUEHD*)   add_term "term_99a276df7596f2eb0902463e95111b76" ;;
+        *EAC3*ATMOS*|*ATMOS*EAC3*) add_term "term_4671d371281904dcc885ddc92e92136d" ;;
+        *EAC3*|*E-AC3*) add_term "term_8945be80314068e014c773f9d4cd7eb2" ;;
+        *AC3*|*DD*)  add_term "term_e72a6bc1a89ca8c39f7a7fac21b95ef8" ;;
+        *DTS:X*)     add_term "term_b3c9a9660e1c6ab6910859254fd592e1" ;;
+        *DTSHDMA*|*DTSHD*MA*) add_term "term_49617ee39348e811452a2a4b7f5c0c64" ;;
+        *DTSHD*|*DTS-HD*) add_term "term_934dcc048eaa8b4ef48548427735a797" ;;
+        *DTS*)       add_term "term_d908f74951dee053ddada1bc0a8206db" ;;
+        *AAC*)       add_term "term_b7ce0315952660c99a4ef7099b9154cb" ;;
+        *FLAC*)      add_term "term_d857503fbf92ed967f81742146619c40" ;;
+        *MP3*)       add_term "term_0e2cdd8fd9f0031e7ffdbdb9255b8a31" ;;
+    esac
+
+    # --- Langues audio ---
+    case "$LANG_TAG" in
+        MULTi*VFF|MULTi*VF2)
+            add_term "term_fd7d017b825ebf12ce579dacea342e9d"  # MULTI
+            add_term "term_bf31bb0a956b133988c2514f62eb1535"  # VFF
+            ;;
+        MULTi)
+            add_term "term_fd7d017b825ebf12ce579dacea342e9d"  # MULTI
+            add_term "term_bf918c3858a7dfe3b44ca70232f50272"  # French
+            add_term "term_c87b5416341e6516baac12aa01fc5bc9"  # English
+            ;;
+        TRUEFRENCH|VFF)
+            add_term "term_bf31bb0a956b133988c2514f62eb1535"  # VFF
+            ;;
+        FRENCH)
+            add_term "term_bf918c3858a7dfe3b44ca70232f50272"  # French
+            ;;
+        VOSTFR)
+            add_term "term_c87b5416341e6516baac12aa01fc5bc9"  # English
+            ;;
+    esac
+
+    # --- Sous-titres ---
+    if [ -n "$SUBTITLES" ]; then
+        echo "$SUBTITLES" | grep -qi 'fre\|fr\b' && add_term "term_9ef8bba2b9cd0d6c167f97b64c216d91"
+        echo "$SUBTITLES" | grep -qi 'eng\|en\b' && add_term "term_c0468b06760040c3a9a0674cd7eb224f"
+    fi
+
+    # --- Langues (champ séparé) ---
+    case "$LANG_TAG" in
+        MULTi*)
+            add_term "term_9cf21ecaa17940f8ea4f3b2d44627876"  # Français
+            add_term "term_de9f4583ec916d7778e08783574796a5"  # Anglais
+            ;;
+        FRENCH|TRUEFRENCH|VFF|VOSTFR)
+            add_term "term_9cf21ecaa17940f8ea4f3b2d44627876"  # Français
+            ;;
+    esac
+
+    # --- Extension ---
+    FILE_EXT=$(echo "$FILENAME" | grep -oE '\.[^.]+$' | tr '[:upper:]' '[:lower:]')
+    case "$FILE_EXT" in
+        .mkv) add_term "term_513ee8e7d062c6868b092c9a4267da8a" ;;
+        .mp4) add_term "term_069f4f60531ce23f9f2bfe4ce834d660" ;;
+        .avi) add_term "term_79db12fca0a1e537f6185f7aee22b8d7" ;;
+    esac
+
+    log "  TermIds : ${TERM_IDS:-<aucun>}"
+
+    # Construire les arguments -F termIds[] pour curl
+    TERM_CURL_ARGS=""
+    if [ -n "$TERM_IDS" ]; then
+        OLD_IFS="$IFS"; IFS=','
+        for TID in $TERM_IDS; do
+            [ -n "$TID" ] && TERM_CURL_ARGS="$TERM_CURL_ARGS -F termIds[]=$TID"
+        done
+        IFS="$OLD_IFS"
+    fi
+
     # ── Upload sur La Cale via /api/internal/torrents/upload (API REST Next.js) ───────
     log "  Upload sur La Cale via API REST /api/internal/torrents/upload..."
 
@@ -861,6 +1012,7 @@ while IFS= read -r MOVIE_JSON; do
         -F "nfoFile=@${NFO_PATH};type=text/plain" \
         -F "description=<${DESCRIPTION_FILE}" \
         ${TMDB_ID:+-F "tmdbId=${TMDB_ID}" -F "tmdbType=MOVIE"} \
+        ${TERM_CURL_ARGS} \
         "${LACALE_URL}/api/internal/torrents/upload" 2>/dev/null)
 
     HTTP_UPLOAD=$(echo "$UPLOAD_RESPONSE" | grep -oE '^HTTP/[0-9.]+ [0-9]+' | tail -1 | grep -oE '[0-9]+$')

@@ -495,7 +495,7 @@ TOTAL_WITH_FILE=$(jq '[.[] | select(.hasFile==true)] | length' "$MOVIES_JSON")
 log "Total films : $TOTAL (avec fichier : $TOTAL_WITH_FILE)"
 
 # ─── Statistiques ─────────────────────────────────────────────────────────────
-UPLOADED=0; SKIPPED=0; ERRORS=0
+UPLOADED=0; SKIPPED=0; ERRORS=0; LAST_ERROR=""
 RESULTS_FILE="${WORK_DIR}/results.txt"
 touch "$RESULTS_FILE"
 
@@ -1050,6 +1050,7 @@ while IFS= read -r MOVIE_JSON; do
     if [ "$UPLOAD_OK" != "true" ]; then
         ERR_MSG=$(echo "$UPLOAD_BODY" | jq -r '.message // .error // ""' 2>/dev/null)
         [ -z "$ERR_MSG" ] && ERR_MSG=$(echo "$UPLOAD_BODY" | head -c 300)
+        LAST_ERROR="$ERR_MSG"
         log "  ERREUR upload (HTTP $HTTP_UPLOAD): $ERR_MSG"
         ERRORS=$((ERRORS+1))
         echo "ERREUR|$TITLE ($YEAR)|Upload: $ERR_MSG" >> "$RESULTS_FILE"
@@ -1131,3 +1132,33 @@ if [ "$OLD_COUNT" -gt 0 ]; then
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')]   ✓ Aucun ancien dossier temporaire à nettoyer"
 fi
+echo '             .                         .               +                         '"'"'        '
+echo '        .   .                  .        .                                      '"'"'          '
+echo '               .  |                  '"'"' '"'"'      '"'"'                  .                        '
+echo '                --o--                            +                                        '
+echo ' .     .     '"'"'    |       '"'"'   .        '"'"'               .       '"'"'      '"'"'+    '"'"'             '
+echo '                           '"'"'                                    +                 '"'"'  '"'"'    '
+echo '               o   .    +            .                     .o                   '"'"'         '
+echo '                                                                + .                       '
+if [ "$UPLOADED" -gt 1 ]; then
+    echo '        '"'"'                .        ~ cargaisons en route ~             .        *   o  '
+elif [ "$UPLOADED" -eq 1 ]; then
+    echo '        '"'"'                .        ~ cargaison en route ~              .        *   o  '
+elif [ "$UPLOADED" -eq 0 ] && echo "$LAST_ERROR" | grep -q "Limite de 1 torrent"; then
+    echo '        '"'"'                .    ~ c'"'"'est la chope! reviens demain! ~             .        *   o  '
+elif [ "$UPLOADED" -eq 0 ] && [ "$ERRORS" -gt 0 ]; then
+    echo '        '"'"'                .    ~ le navire est resté à quai ~             .        *   o  '
+else
+    echo '        '"'"'                .        ~ pas de vent aujourd'"'"'hui ~             .        *   o  '
+fi
+echo '                         .                                    +          +                '
+echo '                          o                +                                              '
+echo ' '"'"'                      .                      .                            *             '
+echo '                     .                      o          *                                  '
+echo '.                    o                                                                    '
+echo '                                      o   *     o       .           .    .                '
+echo '                                                                                o         '
+echo '                          .              .                                                '
+echo '               '"'"'                   .                                              .      '"'"' '
+echo '         o      .                 '"'"'                     '"'"'                                 '
+echo '           .       .                '"'"'                              o            '"'"'          '

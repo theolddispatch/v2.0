@@ -1239,22 +1239,39 @@ data=json.loads(sys.stdin.read())
 print(data[0].get('state','') if data else '')
 " 2>/dev/null)
                 log "  État qBittorrent : ${QB_STATE:-inconnu}"
-                # Si missingFiles → forcer recheck
-                if echo "$QB_STATE" | grep -qi 'missingFiles\|error'; then
-                    log "  WARN: fichier non trouvé par qBittorrent — recheck forcé..."
-                    curl -sf --max-time 10 -b "$QB_COOKIE" -X POST \
-                        -d "hashes=${QB_HASH}" \
-                        "${QB_URL}/api/v2/torrents/recheck" >/dev/null 2>&1
-                    sleep 5
-                    QB_STATE2=$(curl -sf --max-time 10 \
+
+                # Si en cours de vérification → attendre 30s et re-vérifier
+                if echo "$QB_STATE" | grep -qiE 'checking|metaDL'; then
+                    log "  ~ Vérification en cours, attendez 30 secondes ~"
+                    sleep 30
+                    QB_STATE=$(curl -sf --max-time 10 \
                         -b "$QB_COOKIE" \
                         "${QB_URL}/api/v2/torrents/info?hashes=${QB_HASH}" 2>/dev/null | python -c "
 import json,sys
 data=json.loads(sys.stdin.read())
 print(data[0].get('state','') if data else '')
 " 2>/dev/null)
-                    log "  État après recheck : ${QB_STATE2:-inconnu}"
+                    log "  État après attente : ${QB_STATE:-inconnu}"
                 fi
+
+                # Si missingFiles → forcer recheck
+                if echo "$QB_STATE" | grep -qi 'missingFiles\|error'; then
+                    log "  WARN: fichier non trouvé par qBittorrent — recheck forcé..."
+                    curl -sf --max-time 10 -b "$QB_COOKIE" -X POST \
+                        -d "hashes=${QB_HASH}" \
+                        "${QB_URL}/api/v2/torrents/recheck" >/dev/null 2>&1
+                    sleep 30
+                    QB_STATE=$(curl -sf --max-time 10 \
+                        -b "$QB_COOKIE" \
+                        "${QB_URL}/api/v2/torrents/info?hashes=${QB_HASH}" 2>/dev/null | python -c "
+import json,sys
+data=json.loads(sys.stdin.read())
+print(data[0].get('state','') if data else '')
+" 2>/dev/null)
+                    log "  État après recheck : ${QB_STATE:-inconnu}"
+                fi
+
+                log "  État final qBittorrent : ${QB_STATE:-inconnu}"
             fi
         fi
     fi
